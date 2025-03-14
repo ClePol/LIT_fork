@@ -30,8 +30,9 @@ from numpy.typing import NDArray
 import nibabel as nib
 import nibabel.processing
 import torch
-from generative.networks.schedulers import DDPMScheduler, DDIMScheduler
-from torch.amp import autocast # previous: from torch.cuda.amp import autocast
+from schedulers.ddpm import DDPMScheduler
+from schedulers.ddim import DDIMScheduler
+from torch.amp import autocast
 import torch.nn.functional as F
 from networks.DiffusionUnet import DiffusionModelUNetVINN
 
@@ -214,13 +215,45 @@ def inpaint_volume(
     
 
     if DDIM:
-        steps = 10
-        scheduler = DDIMScheduler(num_train_timesteps=1000, schedule="scaled_linear_beta", beta_start=0.0005, beta_end=0.0195, clip_sample=False)
+        steps = 300  # 300 gives good results
+        scheduler = DDIMScheduler(num_train_timesteps=1000, schedule="cosine_poly", steps_offset=0, set_alpha_to_one=True)
         print('Using DDIM scheduler with', steps, 'steps')
     else:
         steps = 1000
         scheduler = DDPMScheduler(num_train_timesteps=steps, schedule="scaled_linear_beta", beta_start=0.0005, beta_end=0.0195)
     scheduler.set_timesteps(num_inference_steps=steps, device=device)
+
+    # visualize scheduler
+    # import matplotlib.pyplot as plt
+
+    # Fix the plotting of scheduler parameters
+    # plt.figure(figsize=(10, 5))
+    
+    # if DDIM:
+    #     # For DDIM, we need to select the alpha values at the specific timesteps
+    #     timesteps = scheduler.timesteps.cpu().numpy()
+    #     # Get alpha values corresponding to the selected timesteps
+    #     alpha_values = scheduler.alphas_cumprod[timesteps-scheduler.steps_offset].cpu().numpy()
+    #     plt.plot(timesteps, alpha_values, label='DDIM alphas at timesteps')
+    # else:
+    #     # For DDPM, we can plot all alpha values
+    #     timesteps = np.arange(len(scheduler.alphas_cumprod))
+    #     alpha_values = scheduler.alphas_cumprod.cpu().numpy()
+    #     plt.plot(timesteps, alpha_values, label='DDPM alphas')
+    
+    # plt.xlabel('Timestep')
+    # plt.ylabel('Alpha cumprod')
+    # plt.title('Noise Schedule')
+    # plt.legend()
+    # plt.gca().invert_xaxis()  # Reverse x-axis to show progression from noisy to clean
+    
+    # # Save the plot instead of showing it (better for headless environments)
+    # os.makedirs(os.path.join(out_dir, 'inpainting_images'), exist_ok=True)
+    
+    # plt.savefig(os.path.join(out_dir, 'inpainting_images/noise_schedule.png'))
+    # plt.show()
+    #plt.close()
+
 
     # Prepare inputs
     mask = (mask > 0).to(device)
@@ -234,17 +267,18 @@ def inpaint_volume(
         scheduler=scheduler,
         diffusion_model_dict=models
     )
+
     
-    #import pdb; pdb.set_trace()
     with torch.inference_mode(), autocast(enabled=True, device_type='cuda'):
-        val_image_inpainted = Inpainter(
+        val_image_inpainted, intermediates = Inpainter(
             mask=mask[0],
             image_masked=val_image_masked[0],
             num_resample_steps=10,
             num_resample_jumps=15,
             batch_size=8,
-            get_intermediates=False,
-            scale_factor=scale_factor
+            get_intermediates=True,
+            scale_factor=scale_factor,
+            verbose=True
         )
     val_image_inpainted = val_image_inpainted.unsqueeze(0)
 
@@ -255,17 +289,17 @@ def inpaint_volume(
                        SLICE_CUT=SLICE_CUT, cut_dim=0)
 
 
-        # ##### plotting of intermediates
-        # if len(models) == 3: # view agg gives 3d intermediates
-        #     slice_c = SLICE_CUT
-        # elif slice_dim == 0:
-        #     slice_c = SLICE_CUT[[1,2]]
-        # elif slice_dim == 1:
-        #     slice_c = SLICE_CUT[[0,2]]
-        # elif slice_dim == 2:
-        #     slice_c = SLICE_CUT[[0,1]]
-        # plot_batch(intermediates, os.path.join(out_dir,'inpainting_images/inpainting_intermediates.png'), 
-        #            slice_cut=slice_c)
+        ##### plotting of intermediates
+        if len(models) == 3: # view agg gives 3d intermediates
+            slice_c = SLICE_CUT
+        elif slice_dim == 0:
+            slice_c = SLICE_CUT[[1,2]]
+        elif slice_dim == 1:
+            slice_c = SLICE_CUT[[0,2]]
+        elif slice_dim == 2:
+            slice_c = SLICE_CUT[[0,1]]
+        plot_batch(intermediates, os.path.join(out_dir,'inpainting_images/inpainting_intermediates.png'), 
+                   slice_cut=slice_c)
 
     if SAVE_VOLUMES:
         nib.save(nib.Nifti1Image(val_image_inpainted[volume_only_slice].cpu().numpy() * 255, *affine_header),
@@ -425,6 +459,6 @@ if __name__ == "__main__":
 
     inpaint_volume(models=model_dict, val_image=val_image, mask=mask, val_image_masked=val_image_masked, scale_factor=scale_factor,
                    out_dir=args.out_dir, SAVE_VOLUMES=SAVE_VOLUMES, SAVE_IMAGES=SAVE_IMAGES,
-                   device=device, slice_input=False, slice_dim=DIM, val_image_nib=val_image_nib, DDIM=False)
+                   device=device, slice_input=False, slice_dim=DIM, val_image_nib=val_image_nib, DDIM=True)
 
 

@@ -39,7 +39,7 @@ from monai.utils import set_determinism
 from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 
-from generative.networks.schedulers import DDPMScheduler
+from monai.networks.schedulers import DDPMScheduler
 from networks.DiffusionUnet import DiffusionModelUNetVINN
 from inference import DiffusionInfererVINN
 from utils import plot_batch, plot_scheduler

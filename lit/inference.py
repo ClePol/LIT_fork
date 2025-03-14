@@ -19,7 +19,7 @@ import math
 import monai
 import torch
 import numpy as np
-from generative.inferers import DiffusionInferer
+from monai.inferers import DiffusionInferer
 from tqdm import tqdm
 #from torch.amp import autocast # previous: from torch.cuda.amp import autocast
 
@@ -340,6 +340,7 @@ class TwoAndHalfDInpaintingInferer(SliceWiseInpaintingInferer):
                 d = self.denoise(t, masks_batch, slices_batch, image_inpainted_slice_batch,
                                                 num_resample_steps, num_resample_jumps, scale_factor=scale_factor)
                 batch_outputs.append(d)
+
                 
             image_inpainted_slice_denoised = torch.cat([img for img in batch_outputs], dim=0)
 
@@ -469,7 +470,7 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
                            get_intermediates: bool, scale_factor=None,
                            verbose=True):
         
-        # set mask to region to noise
+        # set mask region to noise
         image_inpainted = torch.where(
                     mask == 0, image_masked, torch.randn(image_masked.shape, device=image_masked.device)
         )
@@ -484,6 +485,9 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
         
         for t in progress_bar:
             batch_outputs = []
+
+            # import time
+            # start_time = time.time()
 
             current_plane = self.dimension_to_plane[int(t%3)] # alternate between sagittal, axial, coronal
             self.model = self.diffusion_model_dict[current_plane] # .eval()
@@ -507,6 +511,9 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
             start_idx = batch_slice_indices[0] - self.slice_thickness // 2
             end_idx = batch_slice_indices[-1] + self.slice_thickness // 2 + 1
 
+
+            # print(f'Time preparation of step {t}: {time.time() - start_time}')
+
             # assert(len(batched_slices)*self.slice_thickness == end_idx - start_idx), 'batched_slices and image_inpainted_slice have different lengths'
 
             for i in range(math.ceil(len(batched_slices) / batch_size)): # iterate over batches
@@ -520,9 +527,14 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
                 if verbose:
                     progress_bar.set_description(f'Inpainting slices {start_idx} to {end_idx}, plane {current_plane}, timestep {t}')
                 
+                #start_time = time.time()
                 d = self.denoise(t, masks_batch, slices_batch, image_inpainted_slice_batch,
                                                 num_resample_steps, num_resample_jumps, scale_factor=scale_factor)
                 batch_outputs.append(d)
+                #print(f'Time taken for inference step {t}: {time.time() - start_time}')
+
+
+            # start_time = time.time()
                 
             image_inpainted_slice_denoised = torch.cat([img for img in batch_outputs], dim=0)
 
@@ -534,8 +546,10 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
             # put channel dimension back
             image_inpainted = torch.swapaxes(image_inpainted, 0, self.plane_to_dimension[current_plane])
 
-            if get_intermediates and t % 50 == 0:
+            if get_intermediates and t % 10 == 0:
                 intermediates.append(image_inpainted.cpu())
+
+            #print(f'Time taken for postprocessing step {t}: {time.time() - start_time}')
 
 
 
@@ -548,7 +562,7 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
 
 
     def __call__(self, mask: torch.Tensor, image_masked: torch.Tensor, batch_size=1, 
-                 num_resample_steps=10, num_resample_jumps=5, get_intermediates=False, scale_factor=None):
+                 num_resample_steps=10, num_resample_jumps=5, get_intermediates=False, scale_factor=None, verbose=True):
 
         if mask.dtype == torch.bool:
             mask = mask.int()
@@ -562,7 +576,7 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
             mask = monai.data.meta_tensor.MetaTensor.ensure_torch_and_prune_meta(mask, meta=None)
     
         return self.view_agg_inference(image_masked, mask, batch_size,
-                                  num_resample_steps, num_resample_jumps, get_intermediates, scale_factor)
+                                  num_resample_steps, num_resample_jumps, get_intermediates, scale_factor, verbose)
     
 
 class AnomalyInferer(TwoAndHalfDInpaintingInferer):

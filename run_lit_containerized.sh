@@ -195,7 +195,7 @@ if [ "$USE_SINGULARITY" = true ]; then
     ./containerization/deepmi_lit.simg \
     /inpainting/run_lit.sh -i "${INPUT_IMAGE}" -m "${MASK_IMAGE}" -o "${OUT_DIR}" "${POSITIONAL_ARGS[@]}"
 else
-  docker run --gpus "device=$GPUS" -it --ipc=host \
+  docker run --gpus "device=$GPUS" --ipc=host \
     --ulimit memlock=-1 --ulimit stack=67108864 --rm \
     -v "${INPUT_IMAGE}":"${INPUT_IMAGE}":ro \
     -v "${MASK_IMAGE}":"${MASK_IMAGE}":ro \
@@ -203,5 +203,5 @@ else
     -u "$(id -u):$(id -g)" \
     -v "$(pwd)":/workspace \
     -v "${fs_license:-/dev/null}":/fs_license/license.txt:ro \
-    deepmi/lit:$VERSION -i "${INPUT_IMAGE}" -m "${MASK_IMAGE}" -o "${OUT_DIR}" "${POSITIONAL_ARGS[@]}"
+    deepmi/lit:dev -i "${INPUT_IMAGE}" -m "${MASK_IMAGE}" -o "${OUT_DIR}" "${POSITIONAL_ARGS[@]}"
 fi
