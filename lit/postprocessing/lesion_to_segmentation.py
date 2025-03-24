@@ -46,7 +46,7 @@ def mask_lesion(to_mask_path, mask_path):
     masked_orig = orig_img.get_fdata()
     masked_orig[resampled_tumor_mask.get_fdata() > 0] = 99
 
-    return nib.Nifti1Image(masked_orig, orig_img.affine, orig_img.header)
+    return nib.MGHImage(masked_orig, orig_img.affine, orig_img.header)
 
 
 def main():

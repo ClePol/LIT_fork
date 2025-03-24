@@ -367,7 +367,7 @@ class TwoAndHalfDInpaintingInferer(SliceWiseInpaintingInferer):
 
     @torch.no_grad()
     def denoise(self, t, mask: torch.Tensor, image_masked: torch.Tensor, image_inpainted: torch.Tensor,
-                 num_resample_steps=10, num_resample_jumps=5, scale_factor=None):    
+                 num_resample_steps=10, num_resample_jumps=5, scale_factor=None, mask_recombination=True):    
         """
         Run inference on `inputs` with the `network` model.
 
@@ -419,9 +419,12 @@ class TwoAndHalfDInpaintingInferer(SliceWiseInpaintingInferer):
             #plot_batch(image_backward_forward_unknown, DBG_PATH+ 'dbg_after_denoise.png', slice_cut=[100, 84, 140])
 
             # fuse known and unknown regions
-            image_inpainted = torch.where(
-                mask == 0, image_inpainted_backward_known, image_backward_forward_unknown
-            )
+            if mask_recombination:
+                image_inpainted = torch.where(
+                    mask == 0, image_inpainted_backward_known, image_backward_forward_unknown
+                )
+            else:
+                image_inpainted = image_backward_forward_unknown
 
             #plot_batch(image_inpainted, DBG_PATH+ 'dbg_denoised.png', slice_cut=[100, 84, 140])
 
@@ -434,7 +437,8 @@ class TwoAndHalfDInpaintingInferer(SliceWiseInpaintingInferer):
                 image_inpainted = self.diffusion_forward(image_inpainted, t-1)
 
         # fuse known and unknown regions (only required in case of resampling during t=0)
-        image_inpainted = torch.where(mask == 0, image_masked, image_inpainted)
+        if mask_recombination:
+            image_inpainted = torch.where(mask == 0, image_masked, image_inpainted)
 
         return image_inpainted
 
@@ -468,7 +472,7 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
                            batch_size: int,
                            num_resample_steps: int, num_resample_jumps: int,
                            get_intermediates: bool, scale_factor=None,
-                           verbose=True):
+                           verbose=True, skip_recombination_steps=0):
         
         # set mask region to noise
         image_inpainted = torch.where(
@@ -485,7 +489,12 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
         
         for t in progress_bar:
             batch_outputs = []
-
+            
+            if t > t - skip_recombination_steps:
+                mask_recombination = False
+            else:
+                mask_recombination = True
+                
             # import time
             # start_time = time.time()
 
@@ -529,7 +538,10 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
                 
                 #start_time = time.time()
                 d = self.denoise(t, masks_batch, slices_batch, image_inpainted_slice_batch,
-                                                num_resample_steps, num_resample_jumps, scale_factor=scale_factor)
+                                                num_resample_steps, num_resample_jumps, 
+                                                scale_factor=scale_factor, mask_recombination=mask_recombination)
+                if not mask_recombination:
+                    print('skipping recombination')    
                 batch_outputs.append(d)
                 #print(f'Time taken for inference step {t}: {time.time() - start_time}')
 
