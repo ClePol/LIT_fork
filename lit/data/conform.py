@@ -426,6 +426,64 @@ def find_img_size_by_fov(
     return max(min_dim, conform_dim)
 
 
+def get_conformed_vox_img_size(
+        img: nib.analyze.SpatialImage,
+        conform_vox_size,
+        conform_to_1mm_threshold: Optional[float] = None
+) -> Tuple[Union[float, Tuple[float, float, float]], int]:
+    """Extract the voxel size and the image size.
+
+    Parameters
+    ----------
+    img : nib.analyze.SpatialImage
+        Loaded source image
+    conform_vox_size : Union[str, float]
+        Can be:
+        - 'none' or 'keep': keep original anisotropic voxel sizes
+        - 'min' or 'auto': use minimum voxel size
+        - float between 0 and 1: target isotropic voxel size
+    conform_to_1mm_threshold : Optional[float]
+        Threshold above which image is conformed to 1mm
+
+    Returns
+    -------
+    Tuple[Union[float, Tuple[float, float, float]], int]
+        First element is either:
+        - float for isotropic voxel size
+        - tuple of 3 floats for anisotropic voxel sizes
+        Second element is the target image size
+    """
+    if isinstance(conform_vox_size, str) and conform_vox_size.lower() in [
+        "keep",
+        "none",
+    ]:
+        # Return original voxel sizes as tuple
+        conformed_vox_size = tuple(img.header.get_zooms()[:3])
+    # this is similar to mri_convert --conform_min
+    elif isinstance(conform_vox_size, str) and conform_vox_size.lower() in [
+        "min",
+        "auto",
+    ]:
+        conformed_vox_size = find_min_size(img)
+        if (
+            conform_to_1mm_threshold is not None
+            and conformed_vox_size > conform_to_1mm_threshold
+        ):
+            conformed_vox_size = 1.0
+    # this is similar to mri_convert --conform_size <float>
+    elif isinstance(conform_vox_size, float) and 0.0 < conform_vox_size <= 1.0:
+        conformed_vox_size = conform_vox_size
+    else:
+        raise ValueError("Invalid value for conform_vox_size passed.")
+    
+    # For anisotropic voxels, use original dimensions
+    if isinstance(conformed_vox_size, tuple):
+        conformed_img_size = img.shape[:3]
+    else:
+        conformed_img_size = find_img_size_by_fov(img, conformed_vox_size)
+    return conformed_vox_size, conformed_img_size
+
+
 def conform(
         img: nib.analyze.SpatialImage,
         order: int = 1,
@@ -435,21 +493,17 @@ def conform(
 ) -> nib.MGHImage:
     """Python version of mri_convert -c.
 
-    mri_convert -c by default turns image intensity values
-    into UCHAR, reslices images to standard position, fills up slices to standard
-    256x256x256 format and enforces 1mm or minimum isotropic voxel sizes.
-
     Parameters
     ----------
     img : nib.analyze.SpatialImage
         loaded source image
     order : int
         interpolation order (0=nearest,1=linear(default),2=quadratic,3=cubic)
-    conform_vox_size : VoxSizeOption
-        conform image the image to voxel size 1. (default), a
-        specific smaller voxel size (0-1, for high-res), or automatically
-        determine the 'minimum voxel size' from the image (value 'min').
-        This assumes the smallest of the three voxel sizes.
+    conform_vox_size : Union[str, float]
+        Can be:
+        - 'none' or 'keep': keep original anisotropic voxel sizes
+        - 'min' or 'auto': use minimum voxel size
+        - float between 0 and 1: target isotropic voxel size
     dtype : Optional[Type]
         the dtype to enforce in the image (default: UCHAR, as mri_convert -c)
     conform_to_1mm_threshold : Optional[float]
@@ -460,13 +514,6 @@ def conform(
     -------
     nib.MGHImage
         conformed image
-
-    Notes
-    -----
-    Unlike mri_convert -c, we first interpolate (float image), and then rescale
-    to uchar. mri_convert is doing it the other way around. However, we compute
-    the scale factor from the input to increase similarity.
-
     """
     from nibabel.freesurfer.mghformat import MGHHeader
 
@@ -474,16 +521,24 @@ def conform(
         img, conform_vox_size, conform_to_1mm_threshold=conform_to_1mm_threshold
     )
 
-    h1 = MGHHeader.from_header(
-        img.header
-    )  # may copy some parameters if input was MGH format
+    h1 = MGHHeader.from_header(img.header)
 
-    h1.set_data_shape([conformed_img_size, conformed_img_size, conformed_img_size, 1])
-    h1.set_zooms(
-        [conformed_vox_size, conformed_vox_size, conformed_vox_size]
-    )  # --> h1['delta']
+    # Handle both isotropic and anisotropic cases
+    if isinstance(conformed_img_size, tuple):
+        h1.set_data_shape([*conformed_img_size, 1])
+    else:
+        h1.set_data_shape([conformed_img_size, conformed_img_size, conformed_img_size, 1])
+    
+    # Set zoom factors (voxel sizes)
+    if isinstance(conformed_vox_size, tuple):
+        h1.set_zooms(conformed_vox_size)
+        fov = [s * d for s, d in zip(conformed_vox_size, conformed_img_size)]
+        h1["fov"] = max(fov)  # Use maximum FOV for MGH format
+    else:
+        h1.set_zooms([conformed_vox_size] * 3)
+        h1["fov"] = conformed_img_size * conformed_vox_size
+
     h1["Mdc"] = [[-1, 0, 0], [0, 0, -1], [0, 1, 0]]
-    h1["fov"] = conformed_img_size * conformed_vox_size
     h1["Pxyz_c"] = img.affine.dot(np.hstack((np.array(img.shape[:3]) / 2.0, [1])))[:3]
 
     # Here, we are explicitly using MGHHeader.get_affine() to construct the affine as
@@ -640,49 +695,6 @@ def is_conform(
         for condition, value in criteria.items():
             print(" - {:<30} {}".format(condition + ":", value))
     return _is_conform
-
-
-def get_conformed_vox_img_size(
-        img: nib.analyze.SpatialImage,
-        conform_vox_size,
-        conform_to_1mm_threshold: Optional[float] = None
-) -> Tuple[float, int]:
-    """Extract the voxel size and the image size.
-
-    This function only needs the header (not the data).
-
-    Parameters
-    ----------
-    img : nib.analyze.SpatialImage
-        Loaded source image
-    conform_vox_size : VoxSizeOption
-        [MISSING]
-    conform_to_1mm_threshold : Optional[float]
-        [MISSING]
-
-    Returns
-    -------
-    [MISSING]
-    
-    """
-    # this is similar to mri_convert --conform_min
-    if isinstance(conform_vox_size, str) and conform_vox_size.lower() in [
-        "min",
-        "auto",
-    ]:
-        conformed_vox_size = find_min_size(img)
-        if (
-            conform_to_1mm_threshold is not None
-            and conformed_vox_size > conform_to_1mm_threshold
-        ):
-            conformed_vox_size = 1.0
-    # this is similar to mri_convert --conform_size <float>
-    elif isinstance(conform_vox_size, float) and 0.0 < conform_vox_size <= 1.0:
-        conformed_vox_size = conform_vox_size
-    else:
-        raise ValueError("Invalid value for conform_vox_size passed.")
-    conformed_img_size = find_img_size_by_fov(img, conformed_vox_size)
-    return conformed_vox_size, conformed_img_size
 
 
 def check_affine_in_nifti(

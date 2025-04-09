@@ -100,20 +100,61 @@ def dilate_mask(mask: torch.Tensor, num_iterations: int, kernel_size: int = 3) -
     return dilated
 
 
+def upsample_mask(mask: torch.Tensor, upsample_factors: List[int]) -> torch.Tensor:
+    """Upsample a binary mask by inserting rows/columns/slices of ones based on upsample factors.
+    
+    For each dimension where the factor is greater than 1, this function will insert 
+    rows/columns/slices of ones. For example, with a factor of 2, it will insert a row of ones
+    after each original row, effectively doubling the size of that dimension.
+    
+    Args:
+        mask: Input binary mask tensor of shape (x, y, z) or (c, x, y, z)
+        upsample_factors: List of 3 integers specifying upsample factors for x, y, z dimensions
+        
+    Returns:
+        Upsampled mask tensor with inserted rows/columns/slices of ones
+    """
+    if not isinstance(mask, torch.Tensor):
+        mask = torch.tensor(mask)
+    
+    # Get device and dtype
+    device = mask.device
+    dtype = mask.dtype
+    
+    # Check if mask has channel dimension
+    has_channel = len(mask.shape) == 4
+    
+    # Calculate new shape
+    if has_channel:
+        c, x, y, z = mask.shape
+        new_shape = (c, x * upsample_factors[0], y * upsample_factors[1], z * upsample_factors[2])
+    else:
+        x, y, z = mask.shape
+        new_shape = (x * upsample_factors[0], y * upsample_factors[1], z * upsample_factors[2])
+    
+    # Create an output tensor filled with ones
+    upsampled = torch.ones(new_shape, dtype=dtype, device=device)
+    
+    # Copy the original mask values to the appropriate positions
+    if has_channel:
+        # For 4D tensor with channel dim
+        upsampled[:, ::upsample_factors[0], ::upsample_factors[1], ::upsample_factors[2]] = mask
+    else:
+        # For 3D tensor
+        upsampled[::upsample_factors[0], ::upsample_factors[1], ::upsample_factors[2]] = mask
+    
+    return upsampled
 
 
-def conform_nifti(image: NiftiImage) -> NiftiImage:
+def conform_nifti(image: NiftiImage, upsampling=False) -> NiftiImage:
     """Conform NIfTI image to standard orientation and voxel size."""
     if len(image.shape) > 3 and image.shape[3] != 1:
         raise ValueError(f"Multiple input frames ({image.shape[3]}) not supported!")
 
-    _vox_size: str = "min"
-    try:
-        if conform.is_conform(image, conform_vox_size=_vox_size, verbose=False):
-            return image
-        return conform.conform(image, order=2, conform_vox_size=_vox_size)
-    except ValueError as e:
-        raise ValueError(e.args[0])
+    _vox_size: str = "min" if not upsampling else "none"
+    if conform.is_conform(image, conform_vox_size=_vox_size, verbose=False):
+        return image
+    return conform.conform(image, order=2, conform_vox_size=_vox_size)
 
 def get_slice_from_volume(
     volume: torch.Tensor,
@@ -139,7 +180,8 @@ def inpaint_volume(
     SAVE_IMAGES: bool = True,
     device: str = 'cuda',
     DDIM: bool = False,
-    val_image_nib: Optional[NiftiImage] = None
+    val_image_nib: Optional[NiftiImage] = None,
+    skip_recombination_steps: int = 0
 ) -> torch.Tensor:
     """Inpaints a volume using trained diffusion models.
     
@@ -265,7 +307,8 @@ def inpaint_volume(
     Inpainter = OffsetTwoAndHalfDInpaintingInferer(
         inference_steps=steps,
         scheduler=scheduler,
-        diffusion_model_dict=models
+        diffusion_model_dict=models,
+        skip_recombination_steps=skip_recombination_steps
     )
 
     
@@ -329,7 +372,10 @@ if __name__ == "__main__":
     parser.add_argument('-c_sagittal', '--checkpoint_sagittal',
                         type=str, help='checkpoint to load for inference in sagittal plane',
                         default=None, required=False)
-
+    parser.add_argument('--skip_recombination_steps', type=int, help='number of steps to skip recombination',
+                        default=0, required=False)
+    parser.add_argument('--upsample_factor', type=int, nargs=3, help='upsample factor for the output (3 values for x,y,z dimensions)',
+                        default=[1, 1, 1], required=False)
     args = parser.parse_args()
 
 
@@ -342,7 +388,8 @@ if __name__ == "__main__":
     if args.checkpoint_sagittal is not None:
         model_state_dicts['sagittal'] = torch.load(args.checkpoint_sagittal, weights_only=True)
         
-    
+    do_upsampling = args.upsample_factor is not None and (np.array(args.upsample_factor) > 1).any()
+
     # setup model
     device = torch.device("cuda") if torch.cuda.is_available() else "cpu"
     SLICE_THICKNESS = 7
@@ -410,18 +457,45 @@ if __name__ == "__main__":
     assert(list(model_dict.values())[0].is_vinn)
 
     val_image_nib = nib.load(args.input_image)
-    val_image_nib = conform_nifti(val_image_nib)
+    val_image_nib = conform_nifti(val_image_nib, do_upsampling)
+
+    if args.mask_image is not None:
+        mask_nib = nib.load(args.mask_image)
+        # resample mask to image affine
+        mask_nib = nibabel.processing.resample_from_to(mask_nib, val_image_nib, order=0, mode='constant', cval=0)
+
+        mask = torch.from_numpy(mask_nib.get_fdata()).float()
+    else:
+        mask = torch.zeros(val_image_nib.shape)
+    
+    if do_upsampling:
+        val_image_data = val_image_nib.get_fdata()
+        upsample_factors = args.upsample_factor
+        val_image_data = upsample_mask(val_image_data, upsample_factors)
+        
+        val_image_zooms = np.array(val_image_nib.header.get_zooms()) / np.array(upsample_factors)
+        
+        val_image_nib = nib.Nifti1Image(val_image_data, val_image_nib.affine, val_image_nib.header)
+        val_image_nib.header.set_zooms(val_image_zooms)
+        # TODO: edit vox2ras matrix to fit new voxel sizes
+    
 
     val_image = torch.from_numpy(val_image_nib.get_fdata()).float()
 
-    mask_nib = nib.load(args.mask_image)
-    # resample mask to image affine
-    mask_nib = nibabel.processing.resample_from_to(mask_nib, val_image_nib, order=0, mode='constant', cval=0)
-
-    mask = torch.from_numpy(mask_nib.get_fdata()).float()
+    
 
     if args.dilate > 0:
         mask = dilate_mask(mask, args.dilate)
+        
+    if do_upsampling:
+        mask = upsample_mask(mask, upsample_factors)
+
+
+    # os.makedirs(os.path.join(args.out_dir, 'inpainting_volumes'), exist_ok=True)
+    # val_image_masked = val_image * (~(mask > 0)).float()
+    # for name, data in [('original_image', val_image), ('mask', mask*255), ('masked_image', val_image_masked*255)]:
+    #     nib.save(nib.Nifti1Image(data.cpu().numpy(), val_image_nib.affine, val_image_nib.header),
+    #             os.path.join(args.out_dir, f'inpainting_volumes/inpainting_{name}.nii.gz'))
 
 
     INTERNAL_SHAPE = list(model_dict.values())[0].internal_size
@@ -450,6 +524,8 @@ if __name__ == "__main__":
     val_sample_preproc = data_transform(val_sample)
 
 
+    
+    
 
     assert(val_sample_preproc['image'].shape == val_sample_preproc['mask'].shape), f"Image and mask must have the same shape, but got {val_sample_preproc['image'].shape} and {val_sample_preproc['mask'].shape}"
     val_image = val_sample_preproc['image']
@@ -459,6 +535,7 @@ if __name__ == "__main__":
 
     inpaint_volume(models=model_dict, val_image=val_image, mask=mask, val_image_masked=val_image_masked, scale_factor=scale_factor,
                    out_dir=args.out_dir, SAVE_VOLUMES=SAVE_VOLUMES, SAVE_IMAGES=SAVE_IMAGES,
-                   device=device, slice_input=False, slice_dim=DIM, val_image_nib=val_image_nib, DDIM=True)
+                   device=device, slice_input=False, slice_dim=DIM, val_image_nib=val_image_nib, DDIM=True,
+                   skip_recombination_steps=args.skip_recombination_steps)
 
 

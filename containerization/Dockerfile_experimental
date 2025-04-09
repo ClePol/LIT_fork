@@ -4,7 +4,9 @@ FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 
 # install curl
-RUN apt-get update && apt-get install -y curl
+RUN sed -i -e 's/http:\/\/archive\.ubuntu\.com\/ubuntu\//mirror:\/\/mirrors\.ubuntu\.com\/mirrors\.txt/' /etc/apt/sources.list
+RUN apt-get update
+RUN apt-get install -y curl
 
 #RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 RUN pip3 install monai==1.4.0

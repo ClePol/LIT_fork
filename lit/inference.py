@@ -94,7 +94,6 @@ class InpaintingInferer():
                     #     image_inpainted = self.resample(image_inpainted, t)
                     image_inpainted = self.diffusion_forward(image_inpainted, t-1)
 
-
             if get_intermediates and t % 50 == 0:
                 intermediates.append(image_inpainted)
 
@@ -268,13 +267,14 @@ class SliceWiseInpaintingInferer(InpaintingInferer):
 
 class TwoAndHalfDInpaintingInferer(SliceWiseInpaintingInferer):
 
-    def __init__(self, diffusion_model_dict, scheduler, inference_steps):
+    def __init__(self, diffusion_model_dict, scheduler, inference_steps, skip_recombination_steps=0):
         super().__init__(None, list(diffusion_model_dict.values())[0], scheduler, inference_steps)
         #super().super().__init__(inference_steps, scheduler, None)
         self.diffusion_model_dict = diffusion_model_dict
         # map planes to dimensions assuming RAS orientation
         self.plane_to_dimension = {'sagittal': 0, 'axial': 1, 'coronal': 2}
         self.dimension_to_plane = {0: 'sagittal', 1: 'axial', 2: 'coronal'}
+        self.skip_recombination_steps = skip_recombination_steps
 
 
     def view_agg_inference(self, image_masked: torch.Tensor, mask: torch.Tensor, 
@@ -472,7 +472,7 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
                            batch_size: int,
                            num_resample_steps: int, num_resample_jumps: int,
                            get_intermediates: bool, scale_factor=None,
-                           verbose=True, skip_recombination_steps=0):
+                           verbose=True):
         
         # set mask region to noise
         image_inpainted = torch.where(
@@ -489,8 +489,10 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
         
         for t in progress_bar:
             batch_outputs = []
+
+            print(f't: {t}, skip_recombination_steps: {self.skip_recombination_steps}')
             
-            if t > t - skip_recombination_steps:
+            if 0 > t - self.skip_recombination_steps:
                 mask_recombination = False
             else:
                 mask_recombination = True
