@@ -1,0 +1,52 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "name": "Python Debugger: Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": "${command:pickArgs}"
+        },
+        {
+            "name": "Debug skip recombination test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/lit/inpaint_image.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-i", "/groups/ag-reuter/projects/fastsurfer-tumor/data/UPENN_GBM/NIfTI-files/images_structural_unstripped/UPENN-GBM-00002_11/UPENN-GBM-00002_11_T1_unstripped.nii.gz",
+                "-m", "/groups/ag-reuter/projects/fastsurfer-tumor/data/UPENN_GBM/NIfTI-files/images_segm/UPENN-GBM-00002_11_segm.nii.gz",
+                "-o", "test_outputs/debug_upsampling",
+                "--dilate", "2",
+                "--skip_recombination_steps", "1000",
+                "--checkpoint_coronal", "${workspaceFolder}/weights/model_coronal.pt",
+                "--checkpoint_axial", "${workspaceFolder}/weights/model_axial.pt",
+                "--checkpoint_sagittal", "${workspaceFolder}/weights/model_sagittal.pt"
+            ]
+        },
+        {
+            "name": "Debug Upsampling Test HCP downsampled",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/lit/inpaint_image.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-i", "data/HCP_110613_downsampled.nii.gz",
+                "-m", "/groups/ag-reuter/projects/fastsurfer-tumor/experiments/HCP_110613_defo_test_inpainting_FSVdocker/inpainting_volumes/inpainting_mask.nii.gz",
+                "-o", "test_outputs/debug_upsampling",
+                "--dilate", "5",
+                "--upsample_factor", "2", "1", "1",
+                "--checkpoint_coronal", "${workspaceFolder}/weights/model_coronal.pt",
+                "--checkpoint_axial", "${workspaceFolder}/weights/model_axial.pt",
+                "--checkpoint_sagittal", "${workspaceFolder}/weights/model_sagittal.pt"
+            ]
+        }
+
+    ]
+}
