@@ -474,6 +474,7 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
                            get_intermediates: bool, scale_factor=None,
                            verbose=True):
         
+        mask_copy = mask.clone()
         # set mask region to noise
         image_inpainted = torch.where(
                     mask == 0, image_masked, torch.randn(image_masked.shape, device=image_masked.device)
@@ -488,14 +489,18 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
             progress_bar = iter(self.scheduler.timesteps)
         
         for t in progress_bar:
+
+
             batch_outputs = []
 
-            print(f't: {t}, skip_recombination_steps: {self.skip_recombination_steps}')
+            #print(f't: {t}, skip_recombination_steps: {self.skip_recombination_steps}')
             
-            if 0 > t - self.skip_recombination_steps:
+            if t < self.skip_recombination_steps:
                 mask_recombination = False
+                mask = torch.ones_like(mask)
             else:
                 mask_recombination = True
+                mask = mask_copy
                 
             # import time
             # start_time = time.time()
@@ -542,8 +547,6 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
                 d = self.denoise(t, masks_batch, slices_batch, image_inpainted_slice_batch,
                                                 num_resample_steps, num_resample_jumps, 
                                                 scale_factor=scale_factor, mask_recombination=mask_recombination)
-                if not mask_recombination:
-                    print('skipping recombination')    
                 batch_outputs.append(d)
                 #print(f'Time taken for inference step {t}: {time.time() - start_time}')
 
@@ -560,8 +563,10 @@ class OffsetTwoAndHalfDInpaintingInferer(TwoAndHalfDInpaintingInferer):
             # put channel dimension back
             image_inpainted = torch.swapaxes(image_inpainted, 0, self.plane_to_dimension[current_plane])
 
-            if get_intermediates and t % 10 == 0:
+            if get_intermediates and t % 50 == 0:
                 intermediates.append(image_inpainted.cpu())
+            if get_intermediates:
+                np.save(f'./intermediates/inpainting_intermediates_{t}.npy', image_inpainted.cpu())
 
             #print(f'Time taken for postprocessing step {t}: {time.time() - start_time}')
 

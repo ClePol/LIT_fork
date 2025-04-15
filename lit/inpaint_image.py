@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Set matplotlib backend early to avoid Tkinter issues
+import matplotlib
+matplotlib.use('Agg')
+
 import os
 import argparse
 import sys
@@ -21,9 +25,6 @@ from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore', category=FutureWarning, message='`torch.cuda.amp.autocast\\(args...\\)` is deprecated')
 
-
-# supress warning on loading matplotlib
-import matplotlib
 from monai import transforms
 import numpy as np
 from numpy.typing import NDArray
@@ -40,17 +41,10 @@ from data import conform
 from utils.plotting import plot_batch, plot_inpainting
 from inference import *
 
-
-
 # use Agg backend on server
 if os.environ.get('DISPLAY','') == '':
-    
-    #os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
     os.makedirs('/tmp/', exist_ok=True)
     os.environ['MPLCONFIGDIR'] = '/tmp'
-    matplotlib.use('Agg')
-    
-
 
 # Custom types
 PathLike = Union[str, Path]
@@ -327,6 +321,8 @@ def inpaint_volume(
 
     # Save results
     if SAVE_IMAGES:
+        # save intermediates with numpy
+        np.save(os.path.join(out_dir, 'inpainting_images/inpainting_intermediates.npy'), intermediates)
         plot_inpainting(val_image, val_image_masked, val_image_inpainted,
                        out_file=os.path.join(out_dir, 'inpainting_images/inpainting_result.png'),
                        SLICE_CUT=SLICE_CUT, cut_dim=0)
@@ -376,6 +372,8 @@ if __name__ == "__main__":
                         default=0, required=False)
     parser.add_argument('--upsample_factor', type=int, nargs=3, help='upsample factor for the output (3 values for x,y,z dimensions)',
                         default=[1, 1, 1], required=False)
+    parser.add_argument('--DDIM', help='use DDIM scheduler',
+                        default=False, required=False, action='store_true')
     args = parser.parse_args()
 
 
@@ -535,7 +533,7 @@ if __name__ == "__main__":
 
     inpaint_volume(models=model_dict, val_image=val_image, mask=mask, val_image_masked=val_image_masked, scale_factor=scale_factor,
                    out_dir=args.out_dir, SAVE_VOLUMES=SAVE_VOLUMES, SAVE_IMAGES=SAVE_IMAGES,
-                   device=device, slice_input=False, slice_dim=DIM, val_image_nib=val_image_nib, DDIM=True,
+                   device=device, slice_input=False, slice_dim=DIM, val_image_nib=val_image_nib, DDIM=args.DDIM,
                    skip_recombination_steps=args.skip_recombination_steps)
 
 

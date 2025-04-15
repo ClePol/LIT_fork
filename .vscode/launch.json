@@ -4,7 +4,13 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-    
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
         {
             "name": "Python Debugger: Current File with Arguments",
             "type": "debugpy",
@@ -12,6 +18,24 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": "${command:pickArgs}"
+        },
+        {
+            "name": "Inpainting test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/lit/inpaint_image.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-i", "/home/cp1163/testarea/4759/4759_T1.nii",
+                "-m", "/home/cp1163/testarea/4759/4759_lesion_mask.nii.gz",
+                "-o", "test_outputs/debug_upsampling2",
+                "--dilate", "2",
+                //"--skip_recombination_steps", "5",
+                "--upsample_factor", "2", "1", "1",
+                "--checkpoint_coronal", "${workspaceFolder}/weights/model_coronal.pt",
+                "--checkpoint_axial", "${workspaceFolder}/weights/model_axial.pt",
+                "--checkpoint_sagittal", "${workspaceFolder}/weights/model_sagittal.pt"
+            ]
         },
         {
             "name": "Debug skip recombination test",

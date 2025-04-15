@@ -1,0 +1,81 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.env
+.venv
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Data and Output
+*.nii.gz
+*.nii
+*.npy
+*.npz
+*.pkl
+*.h5
+*.hdf5
+*.mat
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.mp4
+*.avi
+*.mov
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.pdf
+
+# Project specific
+intermediates/
+outputs/
+git.hash
+weights/
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# System files
+.DS_Store
+Thumbs.db
